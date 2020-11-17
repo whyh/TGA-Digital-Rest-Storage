@@ -1,0 +1,28 @@
+version: "3.3"
+
+services:
+  redis:
+    image: redis
+    hostname: redis
+    networks:
+      - redis_network
+    volumes:
+      - redis_volume:/data
+
+  rest_storage:
+    build: ./app
+    ports:
+      - 80:80
+    networks:
+      - redis_network
+    depends_on:
+      - redis
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+
+networks:
+  redis_network:
+
+volumes:
+  redis_volume:
