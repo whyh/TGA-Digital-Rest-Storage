@@ -1,13 +1,13 @@
 import json
 import logging
 import os
-from typing import Any, Dict, Final, List
+from typing import Dict, Final, List
 
 from aiocache import RedisCache
 from fastapi import FastAPI, HTTPException, Response
 
 Key = str
-Value = Any
+Value = str
 
 not_found: Final = object()  # Used as a default value for redis.get to properly handle retrieving of None values
 
@@ -27,7 +27,7 @@ async def set_item(key: Key, value: Value) -> Response:
     """
     if (set_count := await redis.set(key, value)) != 1:
         logger.error(f"redis.set({key}, {value}) returned {set_count}. Expected 1")
-        raise HTTPException(status_code=505, detail="Unexpected error has occurred. Please create issue at ...")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
     return Response(status_code=201, media_type="application/json", headers={"Location": f"/items/{key}"}, content=json.dumps({"stored": f"/items/{key}"}))
 
 
@@ -60,6 +60,9 @@ async def set_items(items: Dict[Key, Value]) -> Response:
 
     :returns: Paths to the stored items
     """
+    if not items:
+        raise HTTPException(status_code=400, detail="No items specified")
+
     await redis.multi_set(items.items())
     return Response(status_code=201, media_type="application/json", content=json.dumps({"stored": [f"/items/{key}" for key in items.keys()]}))
 
@@ -71,7 +74,9 @@ async def get_items(keys: List[Key]) -> Response:
 
     :returns: Retrieved items
     """
-    return Response(status_code=200, media_type="application/json", content=json.dumps({key: value for key, value in zip(keys, await redis.multi_get())}))
+    if not keys:
+        raise HTTPException(status_code=404, detail="No items found")
+    return Response(status_code=200, media_type="application/json", content=json.dumps({key: value for key, value in zip(keys, await redis.multi_get(keys))}))
 
 
 @app.delete("/bulk/items", tags=["Bulk CRUD"], responses={200: {"content": {"application/json": {"example": {"deleted_count": 5}}}}})
@@ -82,6 +87,6 @@ async def delete_items(keys: List[Key]) -> Response:
     :returns: Number of deleted items
     """
     # aiocache-0.11.1 does not provide multi_del method. Using redis-cli DEL instead
-    if not (deleted_count := await redis.raw("execute", "DEL", *keys)):
+    if not keys or not (deleted_count := await redis.raw("execute", "DEL", *keys)):
         raise HTTPException(status_code=404, detail="No items found")
     return Response(status_code=200, media_type="application/json", content=json.dumps({"deleted_count": deleted_count}))
